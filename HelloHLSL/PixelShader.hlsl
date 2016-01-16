@@ -1,5 +1,5 @@
 #include "Header.hlsli"
 
-float4 main(VS_OUTPUT input) : SV_Target {
+float4 main(PS_INPUT input) : SV_Target {
 	return input.Color;
 }

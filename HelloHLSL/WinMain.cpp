@@ -16,14 +16,15 @@ using namespace DirectX;
 //--------------------------------------------------------------------------------------
 // Structures
 //--------------------------------------------------------------------------------------
-struct SimpleVertex {
+struct Vertex {
 	XMFLOAT3 Pos;
 	XMFLOAT4 Color;
 };
 
-struct CBChangesEveryFrame {
-	XMFLOAT4X4 mWorldViewProj;
+struct ConstantBuffer {
+	XMFLOAT4X4 WorldViewProj;
 };
+
 
 //--------------------------------------------------------------------------------------
 // Global Variables
@@ -33,7 +34,7 @@ ID3D11PixelShader*          g_pPixelShader = nullptr;
 ID3D11InputLayout*          g_pVertexLayout = nullptr;
 ID3D11Buffer*               g_pVertexBuffer = nullptr;
 ID3D11Buffer*               g_pIndexBuffer = nullptr;
-ID3D11Buffer*               g_pCBChangesEveryFrame = nullptr;
+ID3D11Buffer*               g_pConstantBuffer = nullptr;
 XMMATRIX                    g_World;
 XMMATRIX                    g_View;
 XMMATRIX                    g_Projection;
@@ -41,8 +42,7 @@ XMMATRIX                    g_Projection;
 //--------------------------------------------------------------------------------------
 // Reject any D3D11 devices that aren't acceptable by returning false
 //--------------------------------------------------------------------------------------
-bool CALLBACK IsD3D11DeviceAcceptable(const CD3D11EnumAdapterInfo *AdapterInfo, UINT Output, const CD3D11EnumDeviceInfo *DeviceInfo,
-	DXGI_FORMAT BackBufferFormat, bool bWindowed, void* pUserContext) {
+bool CALLBACK IsD3D11DeviceAcceptable(const CD3D11EnumAdapterInfo *AdapterInfo, UINT Output, const CD3D11EnumDeviceInfo *DeviceInfo, DXGI_FORMAT BackBufferFormat, bool bWindowed, void* pUserContext) {
 	return true;
 }
 
@@ -58,7 +58,7 @@ bool CALLBACK ModifyDeviceSettings(DXUTDeviceSettings* pDeviceSettings, void* pU
 //--------------------------------------------------------------------------------------
 // Create any D3D11 resources that aren't dependant on the back buffer
 //--------------------------------------------------------------------------------------
-HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFACE_DESC* pBackBufferSurfaceDesc, void* pUserContext) {
+HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFACE_DESC* pBackBufferSurfaceDesc,	void* pUserContext) {
 	HRESULT hr = S_OK;
 
 	auto pd3dImmediateContext = DXUTGetD3D11DeviceContext();
@@ -73,14 +73,17 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 	};
 
+	// Create the input layout
 	V_RETURN(pd3dDevice->CreateInputLayout(layout, ARRAYSIZE(layout), g_vertexshader_code, sizeof(g_vertexshader_code), &g_pVertexLayout));
+
+	// Set the input layout
 	pd3dImmediateContext->IASetInputLayout(g_pVertexLayout);
 
 	// Create the pixel shader
 	V_RETURN(pd3dDevice->CreatePixelShader(g_pixelshader_code, sizeof(g_pixelshader_code), nullptr, &g_pPixelShader));
 
 	// Create vertex buffer
-	SimpleVertex vertices[] =
+	Vertex vertices[] =
 	{
 		{ XMFLOAT3(-1.0f, 1.0f, -1.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },
 		{ XMFLOAT3(1.0f, 1.0f, -1.0f), XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
@@ -95,23 +98,21 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	D3D11_BUFFER_DESC bd;
 	ZeroMemory(&bd, sizeof(bd));
 	bd.Usage = D3D11_USAGE_DEFAULT;
-	bd.ByteWidth = sizeof(SimpleVertex) * 8;
+	bd.ByteWidth = sizeof(Vertex) * ARRAYSIZE(vertices);
 	bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
 	bd.CPUAccessFlags = 0;
-	
 	D3D11_SUBRESOURCE_DATA InitData;
 	ZeroMemory(&InitData, sizeof(InitData));
 	InitData.pSysMem = vertices;
-
 	V_RETURN(pd3dDevice->CreateBuffer(&bd, &InitData, &g_pVertexBuffer));
 
 	// Set vertex buffer
-	UINT stride = sizeof(SimpleVertex);
+	UINT stride = sizeof(Vertex);
 	UINT offset = 0;
 	pd3dImmediateContext->IASetVertexBuffers(0, 1, &g_pVertexBuffer, &stride, &offset);
 
 	// Create index buffer
-	WORD indices[] =
+	DWORD indices[] =
 	{
 		3,1,0,
 		2,1,3,
@@ -133,7 +134,7 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	};
 
 	bd.Usage = D3D11_USAGE_DEFAULT;
-	bd.ByteWidth = sizeof(DWORD) * 36;
+	bd.ByteWidth = sizeof(DWORD) * ARRAYSIZE(indices);
 	bd.BindFlags = D3D11_BIND_INDEX_BUFFER;
 	bd.CPUAccessFlags = 0;
 	bd.MiscFlags = 0;
@@ -150,20 +151,17 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	bd.Usage = D3D11_USAGE_DYNAMIC;
 	bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-	bd.ByteWidth = sizeof(CBChangesEveryFrame);
-	V_RETURN(pd3dDevice->CreateBuffer(&bd, nullptr, &g_pCBChangesEveryFrame));
+	bd.ByteWidth = sizeof(ConstantBuffer);
+	V_RETURN(pd3dDevice->CreateBuffer(&bd, nullptr, &g_pConstantBuffer));
 
 	// Initialize the world matrices
 	g_World = XMMatrixIdentity();
 
 	// Initialize the view matrix
-	static const XMVECTORF32 s_Eye = { 0.0f, 3.0f, -6.0f, 0.f };
-	static const XMVECTORF32 s_At = { 0.0f, 1.0f, 0.0f, 0.f };
+	static const XMVECTORF32 s_Eye = { 0.0f, 2.5f, -5.0f, 0.f };
+	static const XMVECTORF32 s_At = { 0.0f, 0.0f, 0.0f, 0.f };
 	static const XMVECTORF32 s_Up = { 0.0f, 1.0f, 0.0f, 0.f };
 	g_View = XMMatrixLookAtLH(s_Eye, s_At, s_Up);
-
-	// Initialize the projection matrix
-	g_Projection = XMMatrixPerspectiveFovLH(XM_PIDIV2, 800 / (FLOAT)480, 0.01f, 100.0f);
 
 	return hr;
 }
@@ -194,29 +192,33 @@ void CALLBACK OnFrameMove(double fTime, float fElapsedTime, void* pUserContext) 
 // Render the scene using the D3D11 device
 //--------------------------------------------------------------------------------------
 void CALLBACK OnD3D11FrameRender(ID3D11Device* pd3dDevice, ID3D11DeviceContext* pd3dImmediateContext, double fTime, float fElapsedTime, void* pUserContext) {
-	// Clear render target and the depth stencil 
+	//
+	// Clear the back buffer
+	//
 	auto pRTV = DXUTGetD3D11RenderTargetView();
 	pd3dImmediateContext->ClearRenderTargetView(pRTV, Colors::MidnightBlue);
 
+	//
+	// Clear the depth stencil
+	//
 	auto pDSV = DXUTGetD3D11DepthStencilView();
 	pd3dImmediateContext->ClearDepthStencilView(pDSV, D3D11_CLEAR_DEPTH, 1.0, 0);
-
-	XMMATRIX worldViewProjection = g_World * g_View * g_Projection;
 
 	// Update constant buffer that changes once per frame
 	HRESULT hr;
 	D3D11_MAPPED_SUBRESOURCE MappedResource;
-	V(pd3dImmediateContext->Map(g_pCBChangesEveryFrame, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource));
-	auto pCB = reinterpret_cast<CBChangesEveryFrame*>(MappedResource.pData);
-	XMStoreFloat4x4(&pCB->mWorldViewProj, XMMatrixTranspose(worldViewProjection));
-	pd3dImmediateContext->Unmap(g_pCBChangesEveryFrame, 0);
+	V(pd3dImmediateContext->Map(g_pConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource));
+	auto pCB = reinterpret_cast<ConstantBuffer*>(MappedResource.pData);
+	XMStoreFloat4x4(&pCB->WorldViewProj, XMMatrixTranspose(g_World * g_View * g_Projection));
+	pd3dImmediateContext->Unmap(g_pConstantBuffer, 0);
 
 	//
 	// Render the cube
 	//
 	pd3dImmediateContext->VSSetShader(g_pVertexShader, nullptr, 0);
-	pd3dImmediateContext->VSSetConstantBuffers(0, 1, &g_pCBChangesEveryFrame);
+	pd3dImmediateContext->VSSetConstantBuffers(0, 1, &g_pConstantBuffer);
 	pd3dImmediateContext->PSSetShader(g_pPixelShader, nullptr, 0);
+	pd3dImmediateContext->PSSetConstantBuffers(0, 1, &g_pConstantBuffer);
 	pd3dImmediateContext->DrawIndexed(36, 0, 0);
 }
 
@@ -237,15 +239,14 @@ void CALLBACK OnD3D11DestroyDevice(void* pUserContext) {
 	SAFE_RELEASE(g_pVertexLayout);
 	SAFE_RELEASE(g_pVertexBuffer);
 	SAFE_RELEASE(g_pIndexBuffer);
-	SAFE_RELEASE(g_pCBChangesEveryFrame);
+	SAFE_RELEASE(g_pConstantBuffer);
 }
 
 
 //--------------------------------------------------------------------------------------
 // Handle messages to the application
 //--------------------------------------------------------------------------------------
-LRESULT CALLBACK MsgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
-	bool* pbNoFurtherProcessing, void* pUserContext) {
+LRESULT CALLBACK MsgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, bool* pbNoFurtherProcessing, void* pUserContext) {
 	return 0;
 }
 
@@ -256,15 +257,11 @@ LRESULT CALLBACK MsgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam,
 void CALLBACK OnKeyboard(UINT nChar, bool bKeyDown, bool bAltDown, void* pUserContext) {
 }
 
-
 //--------------------------------------------------------------------------------------
 // Handle mouse button presses
 //--------------------------------------------------------------------------------------
-void CALLBACK OnMouse(bool bLeftButtonDown, bool bRightButtonDown, bool bMiddleButtonDown,
-	bool bSideButton1Down, bool bSideButton2Down, int nMouseWheelDelta,
-	int xPos, int yPos, void* pUserContext) {
+void CALLBACK OnMouse(bool bLeftButtonDown, bool bRightButtonDown, bool bMiddleButtonDown, bool bSideButton1Down, bool bSideButton2Down, int nMouseWheelDelta, int xPos, int yPos, void* pUserContext) {
 }
-
 
 //--------------------------------------------------------------------------------------
 // Call if device was removed.  Return true to find a new device, false to quit
@@ -272,7 +269,6 @@ void CALLBACK OnMouse(bool bLeftButtonDown, bool bRightButtonDown, bool bMiddleB
 bool CALLBACK OnDeviceRemoved(void* pUserContext) {
 	return true;
 }
-
 
 //--------------------------------------------------------------------------------------
 // Initialize everything and go into a render loop
