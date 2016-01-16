@@ -2,9 +2,8 @@
 // Constant Buffer Variables
 //--------------------------------------------------------------------------------------
 cbuffer ConstantBuffer : register(b0) {
-	matrix WorldViewProj;
+	matrix ModelViewProj;
 };
-
 
 //--------------------------------------------------------------------------------------
 // Input and Output Structures

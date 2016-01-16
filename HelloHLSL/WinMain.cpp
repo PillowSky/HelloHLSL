@@ -22,7 +22,7 @@ struct Vertex {
 };
 
 struct ConstantBuffer {
-	XMFLOAT4X4 WorldViewProj;
+	XMFLOAT4X4 ModelViewProj;
 };
 
 
@@ -35,7 +35,7 @@ ID3D11InputLayout*          g_pVertexLayout = nullptr;
 ID3D11Buffer*               g_pVertexBuffer = nullptr;
 ID3D11Buffer*               g_pIndexBuffer = nullptr;
 ID3D11Buffer*               g_pConstantBuffer = nullptr;
-XMMATRIX                    g_World;
+XMMATRIX                    g_Model;
 XMMATRIX                    g_View;
 XMMATRIX                    g_Projection;
 
@@ -64,7 +64,7 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	auto pd3dImmediateContext = DXUTGetD3D11DeviceContext();
 
 	// Create the vertex shader
-	V_RETURN(pd3dDevice->CreateVertexShader(g_vertexshader_code, sizeof(g_vertexshader_code), nullptr, &g_pVertexShader));
+	V_RETURN(pd3dDevice->CreateVertexShader(g_vertexshader_byte, sizeof(g_vertexshader_byte), nullptr, &g_pVertexShader));
 
 	// Define the input layout
 	D3D11_INPUT_ELEMENT_DESC layout[] =
@@ -74,13 +74,13 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	};
 
 	// Create the input layout
-	V_RETURN(pd3dDevice->CreateInputLayout(layout, ARRAYSIZE(layout), g_vertexshader_code, sizeof(g_vertexshader_code), &g_pVertexLayout));
+	V_RETURN(pd3dDevice->CreateInputLayout(layout, ARRAYSIZE(layout), g_vertexshader_byte, sizeof(g_vertexshader_byte), &g_pVertexLayout));
 
 	// Set the input layout
 	pd3dImmediateContext->IASetInputLayout(g_pVertexLayout);
 
 	// Create the pixel shader
-	V_RETURN(pd3dDevice->CreatePixelShader(g_pixelshader_code, sizeof(g_pixelshader_code), nullptr, &g_pPixelShader));
+	V_RETURN(pd3dDevice->CreatePixelShader(g_pixelshader_byte, sizeof(g_pixelshader_byte), nullptr, &g_pPixelShader));
 
 	// Create vertex buffer
 	Vertex vertices[] =
@@ -155,7 +155,7 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	V_RETURN(pd3dDevice->CreateBuffer(&bd, nullptr, &g_pConstantBuffer));
 
 	// Initialize the world matrices
-	g_World = XMMatrixIdentity();
+	g_Model = XMMatrixIdentity();
 
 	// Initialize the view matrix
 	static const XMVECTORF32 s_Eye = { 0.0f, 2.5f, -5.0f, 0.f };
@@ -184,7 +184,7 @@ HRESULT CALLBACK OnD3D11ResizedSwapChain(ID3D11Device* pd3dDevice, IDXGISwapChai
 //--------------------------------------------------------------------------------------
 void CALLBACK OnFrameMove(double fTime, float fElapsedTime, void* pUserContext) {
 	// Rotate cube around the origin
-	g_World = XMMatrixRotationY(60.0f * XMConvertToRadians((float)fTime));
+	g_Model = XMMatrixRotationY(60.0f * XMConvertToRadians((float)fTime));
 }
 
 
@@ -209,7 +209,7 @@ void CALLBACK OnD3D11FrameRender(ID3D11Device* pd3dDevice, ID3D11DeviceContext* 
 	D3D11_MAPPED_SUBRESOURCE MappedResource;
 	V(pd3dImmediateContext->Map(g_pConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource));
 	auto pCB = reinterpret_cast<ConstantBuffer*>(MappedResource.pData);
-	XMStoreFloat4x4(&pCB->WorldViewProj, XMMatrixTranspose(g_World * g_View * g_Projection));
+	XMStoreFloat4x4(&pCB->ModelViewProj, XMMatrixTranspose(g_Model * g_View * g_Projection));
 	pd3dImmediateContext->Unmap(g_pConstantBuffer, 0);
 
 	//
