@@ -21,10 +21,8 @@ struct SimpleVertex {
 	XMFLOAT4 Color;
 };
 
-struct ConstantBuffer {
-	XMMATRIX mWorld;
-	XMMATRIX mView;
-	XMMATRIX mProjection;
+struct CBChangesEveryFrame {
+	XMFLOAT4X4 mWorldViewProj;
 };
 
 //--------------------------------------------------------------------------------------
@@ -35,7 +33,7 @@ ID3D11PixelShader*          g_pPixelShader = nullptr;
 ID3D11InputLayout*          g_pVertexLayout = nullptr;
 ID3D11Buffer*               g_pVertexBuffer = nullptr;
 ID3D11Buffer*               g_pIndexBuffer = nullptr;
-ID3D11Buffer*               g_pConstantBuffer = nullptr;
+ID3D11Buffer*               g_pCBChangesEveryFrame = nullptr;
 XMMATRIX                    g_World;
 XMMATRIX                    g_View;
 XMMATRIX                    g_Projection;
@@ -64,18 +62,6 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	HRESULT hr = S_OK;
 
 	auto pd3dImmediateContext = DXUTGetD3D11DeviceContext();
-
-	DWORD dwShaderFlags = D3DCOMPILE_ENABLE_STRICTNESS;
-#ifdef _DEBUG
-	// Set the D3DCOMPILE_DEBUG flag to embed debug information in the shaders.
-	// Setting this flag improves the shader debugging experience, but still allows 
-	// the shaders to be optimized and to run exactly the way they will run in 
-	// the release configuration of this program.
-	dwShaderFlags |= D3DCOMPILE_DEBUG;
-
-	// Disable optimizations to further improve shader debugging
-	dwShaderFlags |= D3DCOMPILE_SKIP_OPTIMIZATION;
-#endif
 
 	// Create the vertex shader
 	V_RETURN(pd3dDevice->CreateVertexShader(g_vertexshader_code, sizeof(g_vertexshader_code), nullptr, &g_pVertexShader));
@@ -164,8 +150,8 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	bd.Usage = D3D11_USAGE_DYNAMIC;
 	bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-	bd.ByteWidth = sizeof(ConstantBuffer);
-	V_RETURN(pd3dDevice->CreateBuffer(&bd, nullptr, &g_pConstantBuffer));
+	bd.ByteWidth = sizeof(CBChangesEveryFrame);
+	V_RETURN(pd3dDevice->CreateBuffer(&bd, nullptr, &g_pCBChangesEveryFrame));
 
 	// Initialize the world matrices
 	g_World = XMMatrixIdentity();
@@ -215,19 +201,21 @@ void CALLBACK OnD3D11FrameRender(ID3D11Device* pd3dDevice, ID3D11DeviceContext* 
 	auto pDSV = DXUTGetD3D11DepthStencilView();
 	pd3dImmediateContext->ClearDepthStencilView(pDSV, D3D11_CLEAR_DEPTH, 1.0, 0);
 
-	// Update variables
-	//
-	ConstantBuffer cb;
-	cb.mWorld = XMMatrixTranspose(g_World);
-	cb.mView = XMMatrixTranspose(g_View);
-	cb.mProjection = XMMatrixTranspose(g_Projection);
-	pd3dImmediateContext->UpdateSubresource(g_pConstantBuffer, 0, nullptr, &cb, 0, 0);
+	XMMATRIX worldViewProjection = g_World * g_View * g_Projection;
+
+	// Update constant buffer that changes once per frame
+	HRESULT hr;
+	D3D11_MAPPED_SUBRESOURCE MappedResource;
+	V(pd3dImmediateContext->Map(g_pCBChangesEveryFrame, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource));
+	auto pCB = reinterpret_cast<CBChangesEveryFrame*>(MappedResource.pData);
+	XMStoreFloat4x4(&pCB->mWorldViewProj, XMMatrixTranspose(worldViewProjection));
+	pd3dImmediateContext->Unmap(g_pCBChangesEveryFrame, 0);
 
 	//
 	// Render the cube
 	//
 	pd3dImmediateContext->VSSetShader(g_pVertexShader, nullptr, 0);
-	pd3dImmediateContext->VSSetConstantBuffers(0, 1, &g_pConstantBuffer);
+	pd3dImmediateContext->VSSetConstantBuffers(0, 1, &g_pCBChangesEveryFrame);
 	pd3dImmediateContext->PSSetShader(g_pPixelShader, nullptr, 0);
 	pd3dImmediateContext->DrawIndexed(36, 0, 0);
 }
@@ -249,7 +237,7 @@ void CALLBACK OnD3D11DestroyDevice(void* pUserContext) {
 	SAFE_RELEASE(g_pVertexLayout);
 	SAFE_RELEASE(g_pVertexBuffer);
 	SAFE_RELEASE(g_pIndexBuffer);
-	SAFE_RELEASE(g_pConstantBuffer);
+	SAFE_RELEASE(g_pCBChangesEveryFrame);
 }
 
 

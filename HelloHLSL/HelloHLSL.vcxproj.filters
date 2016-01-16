@@ -23,6 +23,9 @@
     <None Include="..\DXUT\Optional\directx.ico">
       <Filter>Resources</Filter>
     </None>
+    <None Include="Header.hlsli">
+      <Filter>Shaders</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="HelloHLSL.rc">
