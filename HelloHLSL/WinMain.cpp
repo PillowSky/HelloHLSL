@@ -35,7 +35,8 @@ ID3D11InputLayout*          g_pVertexLayout = nullptr;
 ID3D11Buffer*               g_pVertexBuffer = nullptr;
 ID3D11Buffer*               g_pIndexBuffer = nullptr;
 ID3D11Buffer*               g_pConstantBuffer = nullptr;
-XMMATRIX                    g_Model;
+XMMATRIX                    g_ModelCenter;
+XMMATRIX                    g_ModelAround;
 XMMATRIX                    g_View;
 XMMATRIX                    g_Projection;
 
@@ -154,8 +155,9 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	bd.ByteWidth = sizeof(ConstantBuffer);
 	V_RETURN(pd3dDevice->CreateBuffer(&bd, nullptr, &g_pConstantBuffer));
 
-	// Initialize the world matrices
-	g_Model = XMMatrixIdentity();
+	// Initialize the model matrices
+	g_ModelCenter = XMMatrixIdentity();
+	g_ModelAround = XMMatrixIdentity();
 
 	// Initialize the view matrix
 	static const XMVECTORF32 s_Eye = { 0.0f, 2.5f, -5.0f, 0.f };
@@ -173,7 +175,7 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 HRESULT CALLBACK OnD3D11ResizedSwapChain(ID3D11Device* pd3dDevice, IDXGISwapChain* pSwapChain, const DXGI_SURFACE_DESC* pBackBufferSurfaceDesc, void* pUserContext) {
 	// Setup the projection parameters
 	float fAspect = static_cast<float>(pBackBufferSurfaceDesc->Width) / static_cast<float>(pBackBufferSurfaceDesc->Height);
-	g_Projection = XMMatrixPerspectiveFovLH(XM_PI * 0.25f, fAspect, 0.1f, 100.0f);
+	g_Projection = XMMatrixPerspectiveFovLH(XM_PI * 0.5f, fAspect, 0.1f, 100.0f);
 
 	return S_OK;
 }
@@ -183,8 +185,13 @@ HRESULT CALLBACK OnD3D11ResizedSwapChain(ID3D11Device* pd3dDevice, IDXGISwapChai
 // Handle updates to the scene.  This is called regardless of which D3D API is used
 //--------------------------------------------------------------------------------------
 void CALLBACK OnFrameMove(double fTime, float fElapsedTime, void* pUserContext) {
-	// Rotate cube around the origin
-	g_Model = XMMatrixRotationY(60.0f * XMConvertToRadians((float)fTime));
+	// Rotate cube
+	g_ModelCenter = XMMatrixRotationY(fTime);
+	XMMATRIX mScale = XMMatrixScaling(0.3f, 0.3f, 0.3f);
+	XMMATRIX mSpin = XMMatrixRotationZ(-fTime);
+	XMMATRIX mTranslate = XMMatrixTranslation(-4.0f, 0.0f, 0.0f);
+	XMMATRIX mOrbit = XMMatrixRotationY(-fTime * 2.0f);
+	g_ModelAround = mScale * mSpin * mTranslate * mOrbit;
 }
 
 
@@ -204,21 +211,33 @@ void CALLBACK OnD3D11FrameRender(ID3D11Device* pd3dDevice, ID3D11DeviceContext* 
 	auto pDSV = DXUTGetD3D11DepthStencilView();
 	pd3dImmediateContext->ClearDepthStencilView(pDSV, D3D11_CLEAR_DEPTH, 1.0, 0);
 
-	// Update constant buffer that changes once per frame
+	// Update variables for the first cube
 	HRESULT hr;
 	D3D11_MAPPED_SUBRESOURCE MappedResource;
 	V(pd3dImmediateContext->Map(g_pConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource));
 	auto pCB = reinterpret_cast<ConstantBuffer*>(MappedResource.pData);
-	XMStoreFloat4x4(&pCB->ModelViewProj, XMMatrixTranspose(g_Model * g_View * g_Projection));
+	XMStoreFloat4x4(&pCB->ModelViewProj, XMMatrixTranspose(g_ModelCenter * g_View * g_Projection));
 	pd3dImmediateContext->Unmap(g_pConstantBuffer, 0);
 
 	//
-	// Render the cube
+	// Render the first cube
 	//
 	pd3dImmediateContext->VSSetShader(g_pVertexShader, nullptr, 0);
 	pd3dImmediateContext->VSSetConstantBuffers(0, 1, &g_pConstantBuffer);
 	pd3dImmediateContext->PSSetShader(g_pPixelShader, nullptr, 0);
-	pd3dImmediateContext->PSSetConstantBuffers(0, 1, &g_pConstantBuffer);
+	pd3dImmediateContext->DrawIndexed(36, 0, 0);
+
+	//
+	// Update variables for the second cube
+	//
+	V(pd3dImmediateContext->Map(g_pConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource));
+	pCB = reinterpret_cast<ConstantBuffer*>(MappedResource.pData);
+	XMStoreFloat4x4(&pCB->ModelViewProj, XMMatrixTranspose(g_ModelAround * g_View * g_Projection));
+	pd3dImmediateContext->Unmap(g_pConstantBuffer, 0);
+
+	//
+	// Render the second cube
+	//
 	pd3dImmediateContext->DrawIndexed(36, 0, 0);
 }
 
