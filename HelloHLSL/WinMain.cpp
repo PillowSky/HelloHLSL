@@ -18,6 +18,13 @@ using namespace DirectX;
 //--------------------------------------------------------------------------------------
 struct SimpleVertex {
 	XMFLOAT3 Pos;
+	XMFLOAT4 Color;
+};
+
+struct ConstantBuffer {
+	XMMATRIX mWorld;
+	XMMATRIX mView;
+	XMMATRIX mProjection;
 };
 
 //--------------------------------------------------------------------------------------
@@ -27,6 +34,11 @@ ID3D11VertexShader*         g_pVertexShader = nullptr;
 ID3D11PixelShader*          g_pPixelShader = nullptr;
 ID3D11InputLayout*          g_pVertexLayout = nullptr;
 ID3D11Buffer*               g_pVertexBuffer = nullptr;
+ID3D11Buffer*               g_pIndexBuffer = nullptr;
+ID3D11Buffer*               g_pConstantBuffer = nullptr;
+XMMATRIX                    g_World;
+XMMATRIX                    g_View;
+XMMATRIX                    g_Projection;
 
 //--------------------------------------------------------------------------------------
 // Reject any D3D11 devices that aren't acceptable by returning false
@@ -72,7 +84,9 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	D3D11_INPUT_ELEMENT_DESC layout[] =
 	{
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 	};
+
 	V_RETURN(pd3dDevice->CreateInputLayout(layout, ARRAYSIZE(layout), g_vertexshader_code, sizeof(g_vertexshader_code), &g_pVertexLayout));
 	pd3dImmediateContext->IASetInputLayout(g_pVertexLayout);
 
@@ -82,15 +96,20 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	// Create vertex buffer
 	SimpleVertex vertices[] =
 	{
-		XMFLOAT3(0.0f, 0.5f, 0.5f),
-		XMFLOAT3(0.5f, -0.5f, 0.5f),
-		XMFLOAT3(-0.5f, -0.5f, 0.5f),
+		{ XMFLOAT3(-1.0f, 1.0f, -1.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, 1.0f, -1.0f), XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, 1.0f, 1.0f), XMFLOAT4(0.0f, 1.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f, 1.0f, 1.0f), XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f, -1.0f, -1.0f), XMFLOAT4(1.0f, 0.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, -1.0f, -1.0f), XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, -1.0f, 1.0f), XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f, -1.0f, 1.0f), XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f) },
 	};
 
 	D3D11_BUFFER_DESC bd;
 	ZeroMemory(&bd, sizeof(bd));
 	bd.Usage = D3D11_USAGE_DEFAULT;
-	bd.ByteWidth = sizeof(SimpleVertex) * 3;
+	bd.ByteWidth = sizeof(SimpleVertex) * 8;
 	bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
 	bd.CPUAccessFlags = 0;
 	
@@ -105,8 +124,60 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	UINT offset = 0;
 	pd3dImmediateContext->IASetVertexBuffers(0, 1, &g_pVertexBuffer, &stride, &offset);
 
+	// Create index buffer
+	WORD indices[] =
+	{
+		3,1,0,
+		2,1,3,
+
+		0,5,4,
+		1,5,0,
+
+		3,4,7,
+		0,4,3,
+
+		1,6,5,
+		2,6,1,
+
+		2,7,6,
+		3,7,2,
+
+		6,4,5,
+		7,4,6,
+	};
+
+	bd.Usage = D3D11_USAGE_DEFAULT;
+	bd.ByteWidth = sizeof(DWORD) * 36;
+	bd.BindFlags = D3D11_BIND_INDEX_BUFFER;
+	bd.CPUAccessFlags = 0;
+	bd.MiscFlags = 0;
+	InitData.pSysMem = indices;
+	V_RETURN(pd3dDevice->CreateBuffer(&bd, &InitData, &g_pIndexBuffer));
+
+	// Set index buffer
+	pd3dImmediateContext->IASetIndexBuffer(g_pIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
+
 	// Set primitive topology
 	pd3dImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	// Create the constant buffers
+	bd.Usage = D3D11_USAGE_DYNAMIC;
+	bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+	bd.ByteWidth = sizeof(ConstantBuffer);
+	V_RETURN(pd3dDevice->CreateBuffer(&bd, nullptr, &g_pConstantBuffer));
+
+	// Initialize the world matrices
+	g_World = XMMatrixIdentity();
+
+	// Initialize the view matrix
+	static const XMVECTORF32 s_Eye = { 0.0f, 3.0f, -6.0f, 0.f };
+	static const XMVECTORF32 s_At = { 0.0f, 1.0f, 0.0f, 0.f };
+	static const XMVECTORF32 s_Up = { 0.0f, 1.0f, 0.0f, 0.f };
+	g_View = XMMatrixLookAtLH(s_Eye, s_At, s_Up);
+
+	// Initialize the projection matrix
+	g_Projection = XMMatrixPerspectiveFovLH(XM_PIDIV2, 800 / (FLOAT)480, 0.01f, 100.0f);
 
 	return hr;
 }
@@ -115,8 +186,11 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 //--------------------------------------------------------------------------------------
 // Create any D3D11 resources that depend on the back buffer
 //--------------------------------------------------------------------------------------
-HRESULT CALLBACK OnD3D11ResizedSwapChain(ID3D11Device* pd3dDevice, IDXGISwapChain* pSwapChain,
-	const DXGI_SURFACE_DESC* pBackBufferSurfaceDesc, void* pUserContext) {
+HRESULT CALLBACK OnD3D11ResizedSwapChain(ID3D11Device* pd3dDevice, IDXGISwapChain* pSwapChain, const DXGI_SURFACE_DESC* pBackBufferSurfaceDesc, void* pUserContext) {
+	// Setup the projection parameters
+	float fAspect = static_cast<float>(pBackBufferSurfaceDesc->Width) / static_cast<float>(pBackBufferSurfaceDesc->Height);
+	g_Projection = XMMatrixPerspectiveFovLH(XM_PI * 0.25f, fAspect, 0.1f, 100.0f);
+
 	return S_OK;
 }
 
@@ -125,6 +199,8 @@ HRESULT CALLBACK OnD3D11ResizedSwapChain(ID3D11Device* pd3dDevice, IDXGISwapChai
 // Handle updates to the scene.  This is called regardless of which D3D API is used
 //--------------------------------------------------------------------------------------
 void CALLBACK OnFrameMove(double fTime, float fElapsedTime, void* pUserContext) {
+	// Rotate cube around the origin
+	g_World = XMMatrixRotationY(60.0f * XMConvertToRadians((float)fTime));
 }
 
 
@@ -139,9 +215,21 @@ void CALLBACK OnD3D11FrameRender(ID3D11Device* pd3dDevice, ID3D11DeviceContext* 
 	auto pDSV = DXUTGetD3D11DepthStencilView();
 	pd3dImmediateContext->ClearDepthStencilView(pDSV, D3D11_CLEAR_DEPTH, 1.0, 0);
 
-	pd3dImmediateContext->VSSetShader(g_pVertexShader, NULL, 0);
-	pd3dImmediateContext->PSSetShader(g_pPixelShader, NULL, 0);
-	pd3dImmediateContext->Draw(3, 0);
+	// Update variables
+	//
+	ConstantBuffer cb;
+	cb.mWorld = XMMatrixTranspose(g_World);
+	cb.mView = XMMatrixTranspose(g_View);
+	cb.mProjection = XMMatrixTranspose(g_Projection);
+	pd3dImmediateContext->UpdateSubresource(g_pConstantBuffer, 0, nullptr, &cb, 0, 0);
+
+	//
+	// Render the cube
+	//
+	pd3dImmediateContext->VSSetShader(g_pVertexShader, nullptr, 0);
+	pd3dImmediateContext->VSSetConstantBuffers(0, 1, &g_pConstantBuffer);
+	pd3dImmediateContext->PSSetShader(g_pPixelShader, nullptr, 0);
+	pd3dImmediateContext->DrawIndexed(36, 0, 0);
 }
 
 
@@ -160,6 +248,8 @@ void CALLBACK OnD3D11DestroyDevice(void* pUserContext) {
 	SAFE_RELEASE(g_pPixelShader);
 	SAFE_RELEASE(g_pVertexLayout);
 	SAFE_RELEASE(g_pVertexBuffer);
+	SAFE_RELEASE(g_pIndexBuffer);
+	SAFE_RELEASE(g_pConstantBuffer);
 }
 
 
@@ -234,7 +324,7 @@ int WINAPI wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, 
 	DXUTCreateDevice(D3D_FEATURE_LEVEL_11_0, true, 800, 600);
 	DXUTMainLoop(); // Enter into the DXUT ren  der loop
 
-					// Perform any application-level cleanup here
+	// Perform any application-level cleanup here
 
 	return DXUTGetExitCode();
 }
