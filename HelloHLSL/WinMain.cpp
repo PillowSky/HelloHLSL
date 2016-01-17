@@ -17,12 +17,19 @@ using namespace DirectX;
 // Structures
 //--------------------------------------------------------------------------------------
 struct Vertex {
-	XMFLOAT3 Pos;
+	XMFLOAT3 Position;
+	XMFLOAT3 Normal;
 	XMFLOAT4 Color;
 };
 
-struct ConstantBuffer {
-	XMFLOAT4X4 ModelViewProj;
+struct ConstantBufferPerFrame {
+	XMFLOAT4X4 ModelViewProjection;
+	XMFLOAT4X4 Model;
+	XMFLOAT4 LightDir[2];
+};
+
+struct ConstantBufferPersist {
+	XMFLOAT4 LightColor[2];
 };
 
 
@@ -34,11 +41,12 @@ ID3D11PixelShader*          g_pPixelShader = nullptr;
 ID3D11InputLayout*          g_pVertexLayout = nullptr;
 ID3D11Buffer*               g_pVertexBuffer = nullptr;
 ID3D11Buffer*               g_pIndexBuffer = nullptr;
-ID3D11Buffer*               g_pConstantBuffer = nullptr;
-XMMATRIX                    g_ModelCenter;
-XMMATRIX                    g_ModelAround;
+ID3D11Buffer*               g_pConstantBufferPerFrame = nullptr;
+ID3D11Buffer*               g_pConstantBufferPersist = nullptr;
+XMMATRIX                    g_Model;
 XMMATRIX                    g_View;
 XMMATRIX                    g_Projection;
+XMVECTOR                    g_LightDir[2];
 
 //--------------------------------------------------------------------------------------
 // Reject any D3D11 devices that aren't acceptable by returning false
@@ -71,7 +79,8 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	D3D11_INPUT_ELEMENT_DESC layout[] =
 	{
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
 	};
 
 	// Create the input layout
@@ -86,14 +95,35 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	// Create vertex buffer
 	Vertex vertices[] =
 	{
-		{ XMFLOAT3(-1.0f, 1.0f, -1.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },
-		{ XMFLOAT3(1.0f, 1.0f, -1.0f), XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
-		{ XMFLOAT3(1.0f, 1.0f, 1.0f), XMFLOAT4(0.0f, 1.0f, 1.0f, 1.0f) },
-		{ XMFLOAT3(-1.0f, 1.0f, 1.0f), XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },
-		{ XMFLOAT3(-1.0f, -1.0f, -1.0f), XMFLOAT4(1.0f, 0.0f, 1.0f, 1.0f) },
-		{ XMFLOAT3(1.0f, -1.0f, -1.0f), XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f) },
-		{ XMFLOAT3(1.0f, -1.0f, 1.0f), XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f) },
-		{ XMFLOAT3(-1.0f, -1.0f, 1.0f), XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f, 1.0f, -1.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, 1.0f, -1.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, 1.0f, 1.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT4(0.0f, 1.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f, 1.0f, 1.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },
+
+		{ XMFLOAT3(-1.0f, -1.0f, -1.0f), XMFLOAT3(0.0f, -1.0f, 0.0f), XMFLOAT4(1.0f, 0.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, -1.0f, -1.0f), XMFLOAT3(0.0f, -1.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, -1.0f, 1.0f), XMFLOAT3(0.0f, -1.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f, -1.0f, 1.0f), XMFLOAT3(0.0f, -1.0f, 0.0f), XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f) },
+
+		{ XMFLOAT3(-1.0f, -1.0f, 1.0f), XMFLOAT3(-1.0f, 0.0f, 0.0f), XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f, -1.0f, -1.0f), XMFLOAT3(-1.0f, 0.0f, 0.0f), XMFLOAT4(1.0f, 0.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f, 1.0f, -1.0f), XMFLOAT3(-1.0f, 0.0f, 0.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f, 1.0f, 1.0f), XMFLOAT3(-1.0f, 0.0f, 0.0f), XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },
+
+		{ XMFLOAT3(1.0f, -1.0f, 1.0f), XMFLOAT3(1.0f, 0.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, -1.0f, -1.0f), XMFLOAT3(1.0f, 0.0f, 0.0f), XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, 1.0f, -1.0f), XMFLOAT3(1.0f, 0.0f, 0.0f), XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, 1.0f, 1.0f), XMFLOAT3(1.0f, 0.0f, 0.0f), XMFLOAT4(0.0f, 1.0f, 1.0f, 1.0f) },
+
+		{ XMFLOAT3(-1.0f, -1.0f, -1.0f), XMFLOAT3(0.0f, 0.0f, -1.0f), XMFLOAT4(1.0f, 0.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, -1.0f, -1.0f), XMFLOAT3(0.0f, 0.0f, -1.0f), XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, 1.0f, -1.0f), XMFLOAT3(0.0f, 0.0f, -1.0f), XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f, 1.0f, -1.0f), XMFLOAT3(0.0f, 0.0f, -1.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },
+
+		{ XMFLOAT3(-1.0f, -1.0f, 1.0f), XMFLOAT3(0.0f, 0.0f, 1.0f), XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, -1.0f, 1.0f), XMFLOAT3(0.0f, 0.0f, 1.0f), XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(1.0f, 1.0f, 1.0f), XMFLOAT3(0.0f, 0.0f, 1.0f), XMFLOAT4(0.0f, 1.0f, 1.0f, 1.0f) },
+		{ XMFLOAT3(-1.0f, 1.0f, 1.0f), XMFLOAT3(0.0f, 0.0f, 1.0f), XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },
 	};
 
 	D3D11_BUFFER_DESC bd;
@@ -118,27 +148,26 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 		3,1,0,
 		2,1,3,
 
-		0,5,4,
-		1,5,0,
-
-		3,4,7,
-		0,4,3,
-
-		1,6,5,
-		2,6,1,
-
-		2,7,6,
-		3,7,2,
-
 		6,4,5,
 		7,4,6,
+
+		11,9,8,
+		10,9,11,
+
+		14,12,13,
+		15,12,14,
+
+		19,17,16,
+		18,17,19,
+
+		22,20,21,
+		23,20,22
 	};
 
 	bd.Usage = D3D11_USAGE_DEFAULT;
 	bd.ByteWidth = sizeof(DWORD) * ARRAYSIZE(indices);
 	bd.BindFlags = D3D11_BIND_INDEX_BUFFER;
 	bd.CPUAccessFlags = 0;
-	bd.MiscFlags = 0;
 	InitData.pSysMem = indices;
 	V_RETURN(pd3dDevice->CreateBuffer(&bd, &InitData, &g_pIndexBuffer));
 
@@ -148,19 +177,29 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	// Set primitive topology
 	pd3dImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-	// Create the constant buffers
+	// Create the per-frame constant buffers
 	bd.Usage = D3D11_USAGE_DYNAMIC;
+	bd.ByteWidth = sizeof(ConstantBufferPerFrame);
 	bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
 	bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-	bd.ByteWidth = sizeof(ConstantBuffer);
-	V_RETURN(pd3dDevice->CreateBuffer(&bd, nullptr, &g_pConstantBuffer));
+	V_RETURN(pd3dDevice->CreateBuffer(&bd, nullptr, &g_pConstantBufferPerFrame));
+
+	// Initialize the persists
+	ConstantBufferPersist persists = { { XMFLOAT4{ 0.5f, 0.5f, 0.5f, 1.0f }, XMFLOAT4{ 0.5f, 0.0f, 0.0f, 1.0f } } };
+
+	// Create the persist constant buffers
+	bd.Usage = D3D11_USAGE_DEFAULT;
+	bd.ByteWidth = sizeof(ConstantBufferPersist);
+	bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	bd.CPUAccessFlags = 0;
+	InitData.pSysMem = &persists;
+	V_RETURN(pd3dDevice->CreateBuffer(&bd, &InitData, &g_pConstantBufferPersist));
 
 	// Initialize the model matrices
-	g_ModelCenter = XMMatrixIdentity();
-	g_ModelAround = XMMatrixIdentity();
+	g_Model = XMMatrixIdentity();
 
 	// Initialize the view matrix
-	static const XMVECTORF32 s_Eye = { 0.0f, 2.5f, -5.0f, 0.f };
+	static const XMVECTORF32 s_Eye = { 0.0f, 2.5f, 5.0f, 0.f };
 	static const XMVECTORF32 s_At = { 0.0f, 0.0f, 0.0f, 0.f };
 	static const XMVECTORF32 s_Up = { 0.0f, 1.0f, 0.0f, 0.f };
 	g_View = XMMatrixLookAtLH(s_Eye, s_At, s_Up);
@@ -186,12 +225,11 @@ HRESULT CALLBACK OnD3D11ResizedSwapChain(ID3D11Device* pd3dDevice, IDXGISwapChai
 //--------------------------------------------------------------------------------------
 void CALLBACK OnFrameMove(double fTime, float fElapsedTime, void* pUserContext) {
 	// Rotate cube
-	g_ModelCenter = XMMatrixRotationY(fTime);
-	XMMATRIX mScale = XMMatrixScaling(0.3f, 0.3f, 0.3f);
-	XMMATRIX mSpin = XMMatrixRotationZ(-fTime);
-	XMMATRIX mTranslate = XMMatrixTranslation(-4.0f, 0.0f, 0.0f);
-	XMMATRIX mOrbit = XMMatrixRotationY(-fTime * 2.0f);
-	g_ModelAround = mScale * mSpin * mTranslate * mOrbit;
+	g_Model = XMMatrixRotationY(fTime);
+
+	// Rotate light
+	g_LightDir[0] = XMVector3Transform(XMVECTORF32{ 0.0f, 0.0f, 1.0f, 1.0f }, XMMatrixRotationX(-2.0f * fTime));
+	g_LightDir[1] = XMVector3Transform(XMVECTORF32{ 0.0f, 0.0f, -1.0f, 1.0f }, XMMatrixRotationY(-2.0f * fTime));
 }
 
 
@@ -211,33 +249,77 @@ void CALLBACK OnD3D11FrameRender(ID3D11Device* pd3dDevice, ID3D11DeviceContext* 
 	auto pDSV = DXUTGetD3D11DepthStencilView();
 	pd3dImmediateContext->ClearDepthStencilView(pDSV, D3D11_CLEAR_DEPTH, 1.0, 0);
 
+	//
 	// Update variables for the first cube
+	//
 	HRESULT hr;
 	D3D11_MAPPED_SUBRESOURCE MappedResource;
-	V(pd3dImmediateContext->Map(g_pConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource));
-	auto pCB = reinterpret_cast<ConstantBuffer*>(MappedResource.pData);
-	XMStoreFloat4x4(&pCB->ModelViewProj, XMMatrixTranspose(g_ModelCenter * g_View * g_Projection));
-	pd3dImmediateContext->Unmap(g_pConstantBuffer, 0);
+	V(pd3dImmediateContext->Map(g_pConstantBufferPerFrame, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource));
+	auto pCB = reinterpret_cast<ConstantBufferPerFrame*>(MappedResource.pData);
+	XMStoreFloat4x4(&pCB->ModelViewProjection, XMMatrixTranspose(g_Model * g_View * g_Projection));
+	XMStoreFloat4x4(&pCB->Model, XMMatrixTranspose(g_Model));
+
+	XMStoreFloat4(&pCB->LightDir[0], g_LightDir[0]);
+	XMStoreFloat4(&pCB->LightDir[1], g_LightDir[1]);
+	pd3dImmediateContext->Unmap(g_pConstantBufferPerFrame, 0);
 
 	//
-	// Render the first cube
+	// Render the center cube
 	//
 	pd3dImmediateContext->VSSetShader(g_pVertexShader, nullptr, 0);
-	pd3dImmediateContext->VSSetConstantBuffers(0, 1, &g_pConstantBuffer);
+	pd3dImmediateContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferPerFrame);
+	pd3dImmediateContext->VSSetConstantBuffers(1, 1, &g_pConstantBufferPersist);
 	pd3dImmediateContext->PSSetShader(g_pPixelShader, nullptr, 0);
+	pd3dImmediateContext->PSSetConstantBuffers(0, 1, &g_pConstantBufferPerFrame);
+	pd3dImmediateContext->PSSetConstantBuffers(1, 1, &g_pConstantBufferPersist);
 	pd3dImmediateContext->DrawIndexed(36, 0, 0);
 
 	//
-	// Update variables for the second cube
+	// Update variables for the first light
 	//
-	V(pd3dImmediateContext->Map(g_pConstantBuffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource));
-	pCB = reinterpret_cast<ConstantBuffer*>(MappedResource.pData);
-	XMStoreFloat4x4(&pCB->ModelViewProj, XMMatrixTranspose(g_ModelAround * g_View * g_Projection));
-	pd3dImmediateContext->Unmap(g_pConstantBuffer, 0);
+	XMMATRIX mLight = XMMatrixScaling(0.25f, 0.25f, 0.25f) * XMMatrixTranslationFromVector(4 * g_LightDir[0]);
+	V(pd3dImmediateContext->Map(g_pConstantBufferPerFrame, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource));
+	pCB = reinterpret_cast<ConstantBufferPerFrame*>(MappedResource.pData);
+	XMStoreFloat4x4(&pCB->ModelViewProjection, XMMatrixTranspose(mLight * g_View * g_Projection));
+	XMStoreFloat4x4(&pCB->Model, XMMatrixTranspose(mLight));
+
+	XMStoreFloat4(&pCB->LightDir[0], g_LightDir[0]);
+	XMStoreFloat4(&pCB->LightDir[1], g_LightDir[1]);
+	pd3dImmediateContext->Unmap(g_pConstantBufferPerFrame, 0);
 
 	//
-	// Render the second cube
+	// Render the first light
 	//
+	pd3dImmediateContext->VSSetShader(g_pVertexShader, nullptr, 0);
+	pd3dImmediateContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferPerFrame);
+	pd3dImmediateContext->VSSetConstantBuffers(1, 1, &g_pConstantBufferPersist);
+	pd3dImmediateContext->PSSetShader(g_pPixelShader, nullptr, 0);
+	pd3dImmediateContext->PSSetConstantBuffers(0, 1, &g_pConstantBufferPerFrame);
+	pd3dImmediateContext->PSSetConstantBuffers(1, 1, &g_pConstantBufferPersist);
+	pd3dImmediateContext->DrawIndexed(36, 0, 0);
+
+	//
+	// Update variables for the second light
+	//
+	mLight = XMMatrixScaling(0.25f, 0.25f, 0.25f) * XMMatrixTranslationFromVector(4 * g_LightDir[1]);
+	V(pd3dImmediateContext->Map(g_pConstantBufferPerFrame, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource));
+	pCB = reinterpret_cast<ConstantBufferPerFrame*>(MappedResource.pData);
+	XMStoreFloat4x4(&pCB->ModelViewProjection, XMMatrixTranspose(mLight * g_View * g_Projection));
+	XMStoreFloat4x4(&pCB->Model, XMMatrixTranspose(mLight));
+
+	XMStoreFloat4(&pCB->LightDir[0], g_LightDir[0]);
+	XMStoreFloat4(&pCB->LightDir[1], g_LightDir[1]);
+	pd3dImmediateContext->Unmap(g_pConstantBufferPerFrame, 0);
+
+	//
+	// Render the second light
+	//
+	pd3dImmediateContext->VSSetShader(g_pVertexShader, nullptr, 0);
+	pd3dImmediateContext->VSSetConstantBuffers(0, 1, &g_pConstantBufferPerFrame);
+	pd3dImmediateContext->VSSetConstantBuffers(1, 1, &g_pConstantBufferPersist);
+	pd3dImmediateContext->PSSetShader(g_pPixelShader, nullptr, 0);
+	pd3dImmediateContext->PSSetConstantBuffers(0, 1, &g_pConstantBufferPerFrame);
+	pd3dImmediateContext->PSSetConstantBuffers(1, 1, &g_pConstantBufferPersist);
 	pd3dImmediateContext->DrawIndexed(36, 0, 0);
 }
 
@@ -258,7 +340,8 @@ void CALLBACK OnD3D11DestroyDevice(void* pUserContext) {
 	SAFE_RELEASE(g_pVertexLayout);
 	SAFE_RELEASE(g_pVertexBuffer);
 	SAFE_RELEASE(g_pIndexBuffer);
-	SAFE_RELEASE(g_pConstantBuffer);
+	SAFE_RELEASE(g_pConstantBufferPerFrame);
+	SAFE_RELEASE(g_pConstantBufferPersist);
 }
 
 

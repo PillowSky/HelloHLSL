@@ -1,15 +1,22 @@
 //--------------------------------------------------------------------------------------
 // Constant Buffer Variables
 //--------------------------------------------------------------------------------------
-cbuffer ConstantBuffer : register(b0) {
-	matrix ModelViewProj;
+cbuffer ConstantBufferPerFrame : register(b0) {
+	matrix ModelViewProjection;
+	matrix Model;
+	float4 LightDir[2];
+};
+
+cbuffer ConstantBufferPersist : register(b1) {
+	float4 LightColor[2];
 };
 
 //--------------------------------------------------------------------------------------
 // Input and Output Structures
 //--------------------------------------------------------------------------------------
 struct VS_OUTPUT {
-	float4 Pos : SV_POSITION;
+	float4 Position : SV_POSITION;
+	float4 Normal : NORMAL;
 	float4 Color : COLOR;
 };
 
