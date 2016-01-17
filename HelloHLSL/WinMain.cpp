@@ -6,6 +6,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 //--------------------------------------------------------------------------------------
 #include "DXUT.h"
+#include "DXUTcamera.h"
 #include "DXUTgui.h"
 #include "SDKmisc.h"
 #include "VertexShader.h"
@@ -49,12 +50,10 @@ ID3D11Buffer*               g_pConstantBufferPersist = nullptr;
 ID3D11ShaderResourceView*   g_pTextureRV = nullptr;
 ID3D11SamplerState*         g_pSamplerLinear = nullptr;
 
+CModelViewerCamera          g_Camera;
 CDXUTDialogResourceManager  g_DialogResourceManager;
 CDXUTTextHelper*            g_pTextHelper = nullptr;
-
 XMMATRIX                    g_Model;
-XMMATRIX                    g_View;
-XMMATRIX                    g_Projection;
 XMVECTOR                    g_LightDir[2];
 
 //--------------------------------------------------------------------------------------
@@ -215,11 +214,10 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	// Initialize the model matrices
 	g_Model = XMMatrixIdentity();
 
-	// Initialize the view matrix
+	// Setup the camera's view parameters
 	static const XMVECTORF32 s_Eye = { 0.0f, 2.5f, 5.0f, 0.f };
 	static const XMVECTORF32 s_At = { 0.0f, 0.0f, 0.0f, 0.f };
-	static const XMVECTORF32 s_Up = { 0.0f, 1.0f, 0.0f, 0.f };
-	g_View = XMMatrixLookAtLH(s_Eye, s_At, s_Up);
+	g_Camera.SetViewParams(s_Eye, s_At);
 
 	// Load the Texture
 	V_RETURN(DXUTCreateShaderResourceViewFromFile(pd3dDevice, L"misc\\seafloor.dds", &g_pTextureRV));
@@ -246,7 +244,10 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 HRESULT CALLBACK OnD3D11ResizedSwapChain(ID3D11Device* pd3dDevice, IDXGISwapChain* pSwapChain, const DXGI_SURFACE_DESC* pBackBufferSurfaceDesc, void* pUserContext) {
 	// Setup the projection parameters
 	float fAspect = static_cast<float>(pBackBufferSurfaceDesc->Width) / static_cast<float>(pBackBufferSurfaceDesc->Height);
-	g_Projection = XMMatrixPerspectiveFovLH(XM_PI * 0.5f, fAspect, 0.1f, 100.0f);
+
+	g_Camera.SetProjParams(XM_PI * 0.5f, fAspect, 0.1f, 100.0f);
+	g_Camera.SetWindow(pBackBufferSurfaceDesc->Width, pBackBufferSurfaceDesc->Height);
+	g_Camera.SetButtonMasks(MOUSE_LEFT_BUTTON, MOUSE_WHEEL, MOUSE_MIDDLE_BUTTON);
 
 	// Update DialogResourceManager
 	HRESULT hr = S_OK;
@@ -262,6 +263,9 @@ HRESULT CALLBACK OnD3D11ResizedSwapChain(ID3D11Device* pd3dDevice, IDXGISwapChai
 void CALLBACK OnFrameMove(double fTime, float fElapsedTime, void* pUserContext) {
 	// Rotate cube
 	g_Model = XMMatrixRotationY(fTime);
+
+	// Update the camera's position based on user input
+	g_Camera.FrameMove(fElapsedTime);
 
 	// Rotate light
 	g_LightDir[0] = XMVector3Transform(XMVECTORF32{ 0.0f, 0.0f, 1.0f, 1.0f }, XMMatrixRotationX(-2.0f * fTime));
@@ -296,6 +300,10 @@ void CALLBACK OnD3D11FrameRender(ID3D11Device* pd3dDevice, ID3D11DeviceContext* 
 	auto pDSV = DXUTGetD3D11DepthStencilView();
 	pd3dImmediateContext->ClearDepthStencilView(pDSV, D3D11_CLEAR_DEPTH, 1.0, 0);
 
+	XMMATRIX mView = g_Camera.GetViewMatrix();
+	XMMATRIX mProj = g_Camera.GetProjMatrix();
+	XMMATRIX mWorldViewProjection = g_Model * mView * mProj;
+
 	//
 	// Update variables for the first cube
 	//
@@ -303,7 +311,7 @@ void CALLBACK OnD3D11FrameRender(ID3D11Device* pd3dDevice, ID3D11DeviceContext* 
 	D3D11_MAPPED_SUBRESOURCE MappedResource;
 	V(pd3dImmediateContext->Map(g_pConstantBufferPerFrame, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource));
 	auto pCB = reinterpret_cast<ConstantBufferPerFrame*>(MappedResource.pData);
-	XMStoreFloat4x4(&pCB->ModelViewProjection, XMMatrixTranspose(g_Model * g_View * g_Projection));
+	XMStoreFloat4x4(&pCB->ModelViewProjection, XMMatrixTranspose(mWorldViewProjection));
 	XMStoreFloat4x4(&pCB->Model, XMMatrixTranspose(g_Model));
 
 	XMStoreFloat4(&pCB->LightDir[0], g_LightDir[0]);
@@ -327,9 +335,11 @@ void CALLBACK OnD3D11FrameRender(ID3D11Device* pd3dDevice, ID3D11DeviceContext* 
 	// Update variables for the first light
 	//
 	XMMATRIX mLight = XMMatrixScaling(0.25f, 0.25f, 0.25f) * XMMatrixTranslationFromVector(4 * g_LightDir[0]);
+	mWorldViewProjection = mLight * mView * mProj;
+
 	V(pd3dImmediateContext->Map(g_pConstantBufferPerFrame, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource));
 	pCB = reinterpret_cast<ConstantBufferPerFrame*>(MappedResource.pData);
-	XMStoreFloat4x4(&pCB->ModelViewProjection, XMMatrixTranspose(mLight * g_View * g_Projection));
+	XMStoreFloat4x4(&pCB->ModelViewProjection, XMMatrixTranspose(mWorldViewProjection));
 	XMStoreFloat4x4(&pCB->Model, XMMatrixTranspose(mLight));
 
 	XMStoreFloat4(&pCB->LightDir[0], g_LightDir[0]);
@@ -353,9 +363,10 @@ void CALLBACK OnD3D11FrameRender(ID3D11Device* pd3dDevice, ID3D11DeviceContext* 
 	// Update variables for the second light
 	//
 	mLight = XMMatrixScaling(0.25f, 0.25f, 0.25f) * XMMatrixTranslationFromVector(4 * g_LightDir[1]);
+	mWorldViewProjection = mLight * mView * mProj;
 	V(pd3dImmediateContext->Map(g_pConstantBufferPerFrame, 0, D3D11_MAP_WRITE_DISCARD, 0, &MappedResource));
 	pCB = reinterpret_cast<ConstantBufferPerFrame*>(MappedResource.pData);
-	XMStoreFloat4x4(&pCB->ModelViewProjection, XMMatrixTranspose(mLight * g_View * g_Projection));
+	XMStoreFloat4x4(&pCB->ModelViewProjection, XMMatrixTranspose(mWorldViewProjection));
 	XMStoreFloat4x4(&pCB->Model, XMMatrixTranspose(mLight));
 
 	XMStoreFloat4(&pCB->LightDir[0], g_LightDir[0]);
@@ -416,6 +427,8 @@ LRESULT CALLBACK MsgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, boo
 	// Pass messages to dialog resource manager calls so GUI state is updated correctly
 	*pbNoFurtherProcessing = g_DialogResourceManager.MsgProc(hWnd, uMsg, wParam, lParam);
 	if (*pbNoFurtherProcessing)	return 0;
+
+	g_Camera.HandleMessages(hWnd, uMsg, wParam, lParam);
 
 	return 0;
 }
