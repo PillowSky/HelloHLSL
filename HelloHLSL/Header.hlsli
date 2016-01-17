@@ -1,6 +1,9 @@
 //--------------------------------------------------------------------------------------
 // Constant Buffer Variables
 //--------------------------------------------------------------------------------------
+Texture2D txDiffuse : register(t0);
+SamplerState samLinear : register(s0);
+
 cbuffer ConstantBufferPerFrame : register(b0) {
 	matrix ModelViewProjection;
 	matrix Model;
@@ -17,6 +20,7 @@ cbuffer ConstantBufferPersist : register(b1) {
 struct VS_OUTPUT {
 	float4 Position : SV_POSITION;
 	float4 Normal : NORMAL;
+	float2 TexCoord : TEXCOORD;
 	float4 Color : COLOR;
 };
 
