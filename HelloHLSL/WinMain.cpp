@@ -6,6 +6,8 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 //--------------------------------------------------------------------------------------
 #include "DXUT.h"
+#include "DXUTgui.h"
+#include "SDKmisc.h"
 #include "VertexShader.h"
 #include "PixelShader.h"
 
@@ -43,6 +45,10 @@ ID3D11Buffer*               g_pVertexBuffer = nullptr;
 ID3D11Buffer*               g_pIndexBuffer = nullptr;
 ID3D11Buffer*               g_pConstantBufferPerFrame = nullptr;
 ID3D11Buffer*               g_pConstantBufferPersist = nullptr;
+
+CDXUTDialogResourceManager  g_DialogResourceManager;
+CDXUTTextHelper*            g_pTextHelper = nullptr;
+
 XMMATRIX                    g_Model;
 XMMATRIX                    g_View;
 XMMATRIX                    g_Projection;
@@ -60,6 +66,7 @@ bool CALLBACK IsD3D11DeviceAcceptable(const CD3D11EnumAdapterInfo *AdapterInfo, 
 // Called right before creating a D3D device, allowing the app to modify the device settings as needed
 //--------------------------------------------------------------------------------------
 bool CALLBACK ModifyDeviceSettings(DXUTDeviceSettings* pDeviceSettings, void* pUserContext) {
+	pDeviceSettings->d3d11.SyncInterval = 1;
 	return true;
 }
 
@@ -71,6 +78,12 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	HRESULT hr = S_OK;
 
 	auto pd3dImmediateContext = DXUTGetD3D11DeviceContext();
+
+	// Initilize DialogResourceManager
+	V_RETURN(g_DialogResourceManager.OnD3D11CreateDevice(pd3dDevice, pd3dImmediateContext));
+
+	// Initialize CDXUTTextHelper
+	g_pTextHelper = new CDXUTTextHelper(pd3dDevice, pd3dImmediateContext, &g_DialogResourceManager, 15);
 
 	// Create the vertex shader
 	V_RETURN(pd3dDevice->CreateVertexShader(g_vertexshader_byte, sizeof(g_vertexshader_byte), nullptr, &g_pVertexShader));
@@ -216,7 +229,11 @@ HRESULT CALLBACK OnD3D11ResizedSwapChain(ID3D11Device* pd3dDevice, IDXGISwapChai
 	float fAspect = static_cast<float>(pBackBufferSurfaceDesc->Width) / static_cast<float>(pBackBufferSurfaceDesc->Height);
 	g_Projection = XMMatrixPerspectiveFovLH(XM_PI * 0.5f, fAspect, 0.1f, 100.0f);
 
-	return S_OK;
+	// Update DialogResourceManager
+	HRESULT hr = S_OK;
+	V_RETURN(g_DialogResourceManager.OnD3D11ResizedSwapChain(pd3dDevice, pBackBufferSurfaceDesc));
+
+	return hr;
 }
 
 
@@ -232,6 +249,17 @@ void CALLBACK OnFrameMove(double fTime, float fElapsedTime, void* pUserContext) 
 	g_LightDir[1] = XMVector3Transform(XMVECTORF32{ 0.0f, 0.0f, -1.0f, 1.0f }, XMMatrixRotationY(-2.0f * fTime));
 }
 
+//--------------------------------------------------------------------------------------
+// Render the help and statistics text.
+//--------------------------------------------------------------------------------------
+void RenderText() {
+	g_pTextHelper->Begin();
+	g_pTextHelper->SetInsertionPos(5, 5);
+	g_pTextHelper->SetForegroundColor(Colors::Yellow);
+	g_pTextHelper->DrawTextLine(DXUTGetFrameStats(DXUTIsVsyncEnabled()));
+	g_pTextHelper->DrawTextLine(DXUTGetDeviceStats());
+	g_pTextHelper->End();
+}
 
 //--------------------------------------------------------------------------------------
 // Render the scene using the D3D11 device
@@ -321,6 +349,9 @@ void CALLBACK OnD3D11FrameRender(ID3D11Device* pd3dDevice, ID3D11DeviceContext* 
 	pd3dImmediateContext->PSSetConstantBuffers(0, 1, &g_pConstantBufferPerFrame);
 	pd3dImmediateContext->PSSetConstantBuffers(1, 1, &g_pConstantBufferPersist);
 	pd3dImmediateContext->DrawIndexed(36, 0, 0);
+
+	// Render Text
+	// RenderText();
 }
 
 
@@ -328,6 +359,7 @@ void CALLBACK OnD3D11FrameRender(ID3D11Device* pd3dDevice, ID3D11DeviceContext* 
 // Release D3D11 resources created in OnD3D11ResizedSwapChain 
 //--------------------------------------------------------------------------------------
 void CALLBACK OnD3D11ReleasingSwapChain(void* pUserContext) {
+	g_DialogResourceManager.OnD3D11ReleasingSwapChain();
 }
 
 
@@ -335,6 +367,9 @@ void CALLBACK OnD3D11ReleasingSwapChain(void* pUserContext) {
 // Release D3D11 resources created in OnD3D11CreateDevice 
 //--------------------------------------------------------------------------------------
 void CALLBACK OnD3D11DestroyDevice(void* pUserContext) {
+	g_DialogResourceManager.OnD3D11DestroyDevice();
+	DXUTGetGlobalResourceCache().OnDestroyDevice();
+
 	SAFE_RELEASE(g_pVertexShader);
 	SAFE_RELEASE(g_pPixelShader);
 	SAFE_RELEASE(g_pVertexLayout);
@@ -342,6 +377,7 @@ void CALLBACK OnD3D11DestroyDevice(void* pUserContext) {
 	SAFE_RELEASE(g_pIndexBuffer);
 	SAFE_RELEASE(g_pConstantBufferPerFrame);
 	SAFE_RELEASE(g_pConstantBufferPersist);
+	SAFE_DELETE(g_pTextHelper);
 }
 
 
@@ -349,6 +385,10 @@ void CALLBACK OnD3D11DestroyDevice(void* pUserContext) {
 // Handle messages to the application
 //--------------------------------------------------------------------------------------
 LRESULT CALLBACK MsgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, bool* pbNoFurtherProcessing, void* pUserContext) {
+	// Pass messages to dialog resource manager calls so GUI state is updated correctly
+	*pbNoFurtherProcessing = g_DialogResourceManager.MsgProc(hWnd, uMsg, wParam, lParam);
+	if (*pbNoFurtherProcessing)	return 0;
+
 	return 0;
 }
 
