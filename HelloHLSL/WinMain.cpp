@@ -81,12 +81,6 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 
 	auto pd3dImmediateContext = DXUTGetD3D11DeviceContext();
 
-	// Initilize DialogResourceManager
-	V_RETURN(g_DialogResourceManager.OnD3D11CreateDevice(pd3dDevice, pd3dImmediateContext));
-
-	// Initialize CDXUTTextHelper
-	g_pTextHelper = new CDXUTTextHelper(pd3dDevice, pd3dImmediateContext, &g_DialogResourceManager, 15);
-
 	// Create the vertex shader
 	V_RETURN(pd3dDevice->CreateVertexShader(g_vertexshader_byte, sizeof(g_vertexshader_byte), nullptr, &g_pVertexShader));
 
@@ -101,9 +95,6 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 
 	// Create the input layout
 	V_RETURN(pd3dDevice->CreateInputLayout(layout, ARRAYSIZE(layout), g_vertexshader_byte, sizeof(g_vertexshader_byte), &g_pVertexLayout));
-
-	// Set the input layout
-	pd3dImmediateContext->IASetInputLayout(g_pVertexLayout);
 
 	// Create the pixel shader
 	V_RETURN(pd3dDevice->CreatePixelShader(g_pixelshader_byte, sizeof(g_pixelshader_byte), nullptr, &g_pPixelShader));
@@ -143,20 +134,16 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	};
 
 	D3D11_BUFFER_DESC bd;
+	D3D11_SUBRESOURCE_DATA InitData;
 	ZeroMemory(&bd, sizeof(bd));
+	ZeroMemory(&InitData, sizeof(InitData));
+
 	bd.Usage = D3D11_USAGE_DEFAULT;
 	bd.ByteWidth = sizeof(Vertex) * ARRAYSIZE(vertices);
 	bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
 	bd.CPUAccessFlags = 0;
-	D3D11_SUBRESOURCE_DATA InitData;
-	ZeroMemory(&InitData, sizeof(InitData));
 	InitData.pSysMem = vertices;
 	V_RETURN(pd3dDevice->CreateBuffer(&bd, &InitData, &g_pVertexBuffer));
-
-	// Set vertex buffer
-	UINT stride = sizeof(Vertex);
-	UINT offset = 0;
-	pd3dImmediateContext->IASetVertexBuffers(0, 1, &g_pVertexBuffer, &stride, &offset);
 
 	// Create index buffer
 	DWORD indices[] =
@@ -186,12 +173,6 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	bd.CPUAccessFlags = 0;
 	InitData.pSysMem = indices;
 	V_RETURN(pd3dDevice->CreateBuffer(&bd, &InitData, &g_pIndexBuffer));
-
-	// Set index buffer
-	pd3dImmediateContext->IASetIndexBuffer(g_pIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
-
-	// Set primitive topology
-	pd3dImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 	// Create the per-frame constant buffers
 	bd.Usage = D3D11_USAGE_DYNAMIC;
@@ -234,6 +215,12 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 	sampDesc.MaxLOD = D3D11_FLOAT32_MAX;
 	V_RETURN(pd3dDevice->CreateSamplerState(&sampDesc, &g_pSamplerLinear));
 
+	// Initilize DialogResourceManager
+	V_RETURN(g_DialogResourceManager.OnD3D11CreateDevice(pd3dDevice, pd3dImmediateContext));
+
+	// Initialize CDXUTTextHelper
+	g_pTextHelper = new CDXUTTextHelper(pd3dDevice, pd3dImmediateContext, &g_DialogResourceManager, 15);
+
 	return hr;
 }
 
@@ -244,7 +231,6 @@ HRESULT CALLBACK OnD3D11CreateDevice(ID3D11Device* pd3dDevice, const DXGI_SURFAC
 HRESULT CALLBACK OnD3D11ResizedSwapChain(ID3D11Device* pd3dDevice, IDXGISwapChain* pSwapChain, const DXGI_SURFACE_DESC* pBackBufferSurfaceDesc, void* pUserContext) {
 	// Setup the projection parameters
 	float fAspect = static_cast<float>(pBackBufferSurfaceDesc->Width) / static_cast<float>(pBackBufferSurfaceDesc->Height);
-
 	g_Camera.SetProjParams(XM_PI * 0.5f, fAspect, 0.1f, 100.0f);
 	g_Camera.SetWindow(pBackBufferSurfaceDesc->Width, pBackBufferSurfaceDesc->Height);
 	g_Camera.SetButtonMasks(MOUSE_LEFT_BUTTON, MOUSE_WHEEL, MOUSE_MIDDLE_BUTTON);
@@ -300,6 +286,25 @@ void CALLBACK OnD3D11FrameRender(ID3D11Device* pd3dDevice, ID3D11DeviceContext* 
 	auto pDSV = DXUTGetD3D11DepthStencilView();
 	pd3dImmediateContext->ClearDepthStencilView(pDSV, D3D11_CLEAR_DEPTH, 1.0, 0);
 
+	//
+	// Set Input Layout
+	//
+	pd3dImmediateContext->IASetInputLayout(g_pVertexLayout);
+
+	//
+	// Set Vertex and Index buffers
+	//
+	UINT stride = sizeof(Vertex);
+	UINT offset = 0;
+	pd3dImmediateContext->IASetVertexBuffers(0, 1, &g_pVertexBuffer, &stride, &offset);
+	pd3dImmediateContext->IASetIndexBuffer(g_pIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
+
+	// Set primitive topology
+	pd3dImmediateContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+	//
+	// Get the matrix
+	//
 	XMMATRIX mView = g_Camera.GetViewMatrix();
 	XMMATRIX mProj = g_Camera.GetProjMatrix();
 	XMMATRIX mWorldViewProjection = g_Model * mView * mProj;
@@ -387,8 +392,7 @@ void CALLBACK OnD3D11FrameRender(ID3D11Device* pd3dDevice, ID3D11DeviceContext* 
 	pd3dImmediateContext->DrawIndexed(36, 0, 0);
 
 	// Render Text
-	//RenderText();
-	//DXUTTRACE(L"Render Time: %f, FPS: %f\n", fElapsedTime, 1 / fElapsedTime);
+	RenderText();
 }
 
 
@@ -404,9 +408,6 @@ void CALLBACK OnD3D11ReleasingSwapChain(void* pUserContext) {
 // Release D3D11 resources created in OnD3D11CreateDevice 
 //--------------------------------------------------------------------------------------
 void CALLBACK OnD3D11DestroyDevice(void* pUserContext) {
-	g_DialogResourceManager.OnD3D11DestroyDevice();
-	DXUTGetGlobalResourceCache().OnDestroyDevice();
-
 	SAFE_RELEASE(g_pVertexShader);
 	SAFE_RELEASE(g_pPixelShader);
 	SAFE_RELEASE(g_pVertexLayout);
@@ -416,6 +417,9 @@ void CALLBACK OnD3D11DestroyDevice(void* pUserContext) {
 	SAFE_RELEASE(g_pConstantBufferPersist);
 	SAFE_RELEASE(g_pTextureRV);
 	SAFE_RELEASE(g_pSamplerLinear);
+
+	g_DialogResourceManager.OnD3D11DestroyDevice();
+	DXUTGetGlobalResourceCache().OnDestroyDevice();
 	SAFE_DELETE(g_pTextHelper);
 }
 
