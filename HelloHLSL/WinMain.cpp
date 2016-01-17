@@ -248,14 +248,14 @@ HRESULT CALLBACK OnD3D11ResizedSwapChain(ID3D11Device* pd3dDevice, IDXGISwapChai
 //--------------------------------------------------------------------------------------
 void CALLBACK OnFrameMove(double fTime, float fElapsedTime, void* pUserContext) {
 	// Rotate cube
-	g_Model = XMMatrixRotationY(fTime);
+	g_Model = XMMatrixRotationY((float)fTime);
 
 	// Update the camera's position based on user input
 	g_Camera.FrameMove(fElapsedTime);
 
 	// Rotate light
-	g_LightDir[0] = XMVector3Transform(XMVECTORF32{ 0.0f, 0.0f, 1.0f, 1.0f }, XMMatrixRotationX(-2.0f * fTime));
-	g_LightDir[1] = XMVector3Transform(XMVECTORF32{ 0.0f, 0.0f, -1.0f, 1.0f }, XMMatrixRotationY(-2.0f * fTime));
+	g_LightDir[0] = XMVector3Transform(XMVECTORF32{ 0.0f, 0.0f, 1.0f, 1.0f }, XMMatrixRotationX(-2.0f * (float)fTime));
+	g_LightDir[1] = XMVector3Transform(XMVECTORF32{ 0.0f, 0.0f, -1.0f, 1.0f }, XMMatrixRotationY(-2.0f * (float)fTime));
 }
 
 //--------------------------------------------------------------------------------------
